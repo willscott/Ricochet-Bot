@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
+	"net"
 	"os"
 
 	goricochet "github.com/s-rah/go-ricochet"
@@ -16,41 +16,16 @@ import (
 	"git.schwanenlied.me/yawning/bulb"
 )
 
-// TrebuchetBot represents the bot logic.
-type TrebuchetBot struct {
-	goricochet.StandardRicochetService
-}
-
-// IsKnownContact Always Accepts Contact Requests
-func (tb *TrebuchetBot) IsKnownContact(hostname string) bool {
-	return true
-}
-
-// OnContactRequest fires on contact requests
-func (tb *TrebuchetBot) OnContactRequest(oc *goricochet.OpenConnection, channelID int32, nick string, message string) {
-	//tb.StandardRicochetService.OnNewConnection(oc)
-	//tb.StandardRicochetService.OnContactRequest(channelID, nick, message)
-	oc.AckContactRequestOnResponse(channelID, "Accepted")
-	oc.CloseChannel(channelID)
-}
-
-// OnChatMessage fires on incoming chat mressages.
-func (tb *TrebuchetBot) OnChatMessage(oc *goricochet.OpenConnection, channelID int32, messageID int32, message string) {
-	log.Printf("Received Message from %s: %s", oc.OtherHostname, message)
-	oc.AckChatMessage(channelID, messageID)
-	if oc.GetChannelType(6) == "none" {
-		oc.OpenChatChannel(6)
-	}
-	oc.SendMessage(6, message)
-}
-
 var controlPort = flag.String("controlport", "127.0.0.1:9051", "Local socket/path to tor control port.")
+var identity = flag.String("identity", "private.key", "Location of ricochet private key identifier.")
 
 func main() {
 	flag.Parse()
 
 	ricochetService := new(TrebuchetBot)
-	if _, err := os.Stat("./private_key"); os.IsNotExist(err) {
+
+	if _, err := os.Stat(*identity); os.IsNotExist(err) {
+		fmt.Printf("No Private key exists at %s. Creating one.", *identity)
 		key, _ := rsa.GenerateKey(rand.Reader, 1024)
 		dat := x509.MarshalPKCS1PrivateKey(key)
 		block := pem.Block{
@@ -59,14 +34,21 @@ func main() {
 			Bytes:   dat,
 		}
 		x := pem.EncodeToMemory(&block)
-		ioutil.WriteFile("./private_key", x, 0600)
+		ioutil.WriteFile(*identity, x, 0600)
 	}
-	if err := ricochetService.Init("./private_key"); err != nil {
+	if err := ricochetService.Init(*identity); err != nil {
 		panic(err)
 	}
 
-	// separate from giving ricohet the private key. also give it to tor for an onion:
-	pemData, err := ioutil.ReadFile("./private_key")
+	// Make the listener for the ricochet client
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	_, localPort, _ := net.SplitHostPort(ln.Addr().String())
+
+	// read in the privaate key we're usng and give it to tor
+	pemData, err := ioutil.ReadFile(*identity)
 	if err != nil {
 		panic("Failed to read: " + err.Error())
 	}
@@ -75,7 +57,7 @@ func main() {
 
 	ports := make([]bulb.OnionPortSpec, 1)
 	ports[0].VirtPort = 9878
-	ports[0].Target = "12345"
+	ports[0].Target = localPort
 	net := "tcp4"
 	if (*controlPort)[0] == '/' {
 		net = "unix"
@@ -95,5 +77,5 @@ func main() {
 
 	fmt.Printf("Listening at: %s ", inf.OnionID)
 
-	ricochetService.Listen(ricochetService, 12345)
+	goricochet.Serve(ln, ricochetService)
 }
