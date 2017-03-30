@@ -27,9 +27,6 @@ func (tb *TrebuchetBot) OnNewConnection(oc *goricochet.OpenConnection) {
 	tb.StandardRicochetService.OnNewConnection(oc)
 	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{}, tb, -1, oc.OtherHostname}
 
-	for _, c := range tb.activeContacts {
-		c.send(tc.nick + " joined the room.")
-	}
 	tb.activeContacts = append(tb.activeContacts, tc)
 	go oc.Process(tc)
 }
@@ -90,13 +87,30 @@ func (tc *TrebuchetConnection) OnContactRequest(channelID int32, nick string, me
 	tc.Conn.CloseChannel(channelID)
 }
 
+// OnAuthenticationProof fires when the remote user authenticates itself.
+func (tc *TrebuchetConnection) OnAuthenticationProof(channelID int32, pubkey []byte, sig []byte) {
+	tc.StandardRicochetConnection.OnAuthenticationProof(channelID, pubkey, sig)
+
+	tc.nick = tc.Conn.OtherHostname
+
+	for _, c := range tc.TrebuchetBot.activeContacts {
+		if c != tc {
+			c.send(tc.nick + " joined the room.")
+		}
+	}
+}
+
+var invitere = regexp.MustCompile(`^\/invite (?:ricochet:)?([a-z0-9]{16})(?:\.onion)$`)
+var nickre = regexp.MustCompile(`^\/nick ([a-z0-9]*)$`)
+
 // OnChatMessage fires on incoming chat mressages.
 func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, message string) {
 	log.Printf("Received Message from %s: %s", tc.Conn.OtherHostname, message)
 	tc.Conn.AckChatMessage(channelID, messageID)
-	re := regexp.MustCompile("^/invite (?:ricochet:)?([a-z0-9]{16})(?:.onion)$")
-	if addr := re.FindString(message); len(addr) > 0 {
-		if err := tc.TrebuchetBot.Invite(addr); err != nil {
+
+	if addr := invitere.FindStringSubmatch(message); len(addr[1]) > 0 {
+		tc.send("Inviting " + addr[1])
+		if err := tc.TrebuchetBot.Invite(addr[1]); err != nil {
 			tc.send("Failed in invite contact: " + err.Error())
 		}
 		return
@@ -105,6 +119,10 @@ func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, m
 		if c != tc {
 			c.send(tc.nick + ": " + message)
 		}
+	}
+	if name := nickre.FindStringSubmatch(message); len(name[1]) > 0 {
+		tc.send("You are now known as " + name[1])
+		tc.nick = name[1]
 	}
 }
 
