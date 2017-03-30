@@ -108,7 +108,8 @@ func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, m
 	log.Printf("Received Message from %s: %s", tc.Conn.OtherHostname, message)
 	tc.Conn.AckChatMessage(channelID, messageID)
 
-	if addr := invitere.FindStringSubmatch(message); len(addr[1]) > 0 {
+	//fmt.Printf("invite re: %v\n", invitere.FindStringSubmatch(message))
+	if addr := invitere.FindStringSubmatch(message); len(addr) > 1 && len(addr[1]) > 0 {
 		tc.send("Inviting " + addr[1])
 		if err := tc.TrebuchetBot.Invite(addr[1]); err != nil {
 			tc.send("Failed in invite contact: " + err.Error())
@@ -120,7 +121,8 @@ func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, m
 			c.send(tc.nick + ": " + message)
 		}
 	}
-	if name := nickre.FindStringSubmatch(message); len(name[1]) > 0 {
+	//fmt.Printf("nick re: %v\n", nickre.FindStringSubmatch(message))
+	if name := nickre.FindStringSubmatch(message); len(name) > 1 && len(name[1]) > 0 {
 		tc.send("You are now known as " + name[1])
 		tc.nick = name[1]
 	}
