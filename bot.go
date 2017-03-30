@@ -33,11 +33,14 @@ func (tb *TrebuchetBot) OnNewConnection(oc *goricochet.OpenConnection) {
 
 // Invite a user to become a contact and start chatting.
 func (tb *TrebuchetBot) Invite(addr string) error {
-	oc, err := tb.Connect(addr + ".onion:9878")
+	oc, err := tb.Connect(addr)
 	if err != nil {
 		return err
 	}
-	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{}, tb, -1, addr}
+	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{
+		Conn:       oc,
+		PrivateKey: tb.PrivateKey,
+	}, tb, -1, addr}
 	tb.activeContacts = append(tb.activeContacts, tc)
 
 	go oc.Process(tc)
