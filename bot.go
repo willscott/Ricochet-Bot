@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"regexp"
 
 	goricochet "github.com/s-rah/go-ricochet"
 )
@@ -26,11 +27,25 @@ func (tb *TrebuchetBot) OnNewConnection(oc *goricochet.OpenConnection) {
 	tb.StandardRicochetService.OnNewConnection(oc)
 	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{}, tb, -1, oc.OtherHostname}
 
-	for i := 0; i < len(tb.activeContacts); i++ {
-		tb.activeContacts[i].send(tc.Conn.OtherHostname + " joined the room.")
+	for _, c := range tb.activeContacts {
+		c.send(tc.nick + " joined the room.")
 	}
 	tb.activeContacts = append(tb.activeContacts, tc)
 	go oc.Process(tc)
+}
+
+// Invite a user to become a contact and start chatting.
+func (tb *TrebuchetBot) Invite(addr string) error {
+	oc, err := tb.Connect(addr + ".onion:9878")
+	if err != nil {
+		return err
+	}
+	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{}, tb, -1, addr}
+	tb.activeContacts = append(tb.activeContacts, tc)
+
+	go oc.Process(tc)
+	oc.SendContactRequest(5, "", "You've been invited to join a group chat")
+	return nil
 }
 
 // TrebuchetConnection represents a connection made by TrebucetBot
@@ -79,9 +94,16 @@ func (tc *TrebuchetConnection) OnContactRequest(channelID int32, nick string, me
 func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, message string) {
 	log.Printf("Received Message from %s: %s", tc.Conn.OtherHostname, message)
 	tc.Conn.AckChatMessage(channelID, messageID)
-	for i := 0; i < len(tc.activeContacts); i++ {
-		if tc.activeContacts[i] != tc {
-			tc.activeContacts[i].send(tc.nick + ": " + message)
+	re := regexp.MustCompile("^/invite (?:ricochet:)?([a-z0-9]{16})(?:.onion)$")
+	if addr := re.FindString(message); len(addr) > 0 {
+		if err := tc.TrebuchetBot.Invite(addr); err != nil {
+			tc.send("Failed in invite contact: " + err.Error())
+		}
+		return
+	}
+	for _, c := range tc.activeContacts {
+		if c != tc {
+			c.send(tc.nick + ": " + message)
 		}
 	}
 }
@@ -95,6 +117,9 @@ func (tc *TrebuchetConnection) OnDisconnect() {
 			tc.TrebuchetBot.activeContacts = tc.TrebuchetBot.activeContacts[:len(tc.TrebuchetBot.activeContacts)-1]
 			break
 		}
+	}
+	for _, c := range tc.TrebuchetBot.activeContacts {
+		c.send(tc.nick + " left the room.")
 	}
 	tc.StandardRicochetConnection.OnDisconnect()
 }
