@@ -10,6 +10,8 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 
 	goricochet "github.com/s-rah/go-ricochet"
 
@@ -18,11 +20,19 @@ import (
 
 var controlPort = flag.String("controlport", "127.0.0.1:9051", "Local socket/path to tor control port.")
 var identity = flag.String("identity", "private.key", "Location of ricochet private key identifier.")
+var state = flag.String("statefile", "room.state", "Location of ricochet room state file.")
 
 func main() {
 	flag.Parse()
 
 	ricochetService := new(TrebuchetBot)
+
+	if _, err := io.Stat(*state); os.IsNotExist(err) {
+		fmt.Printf("No State exists. Starting new room.")
+	} else {
+		bytes, _ := ioutil.ReadFile(*state)
+		ricochetService.UnmarshalJSON(bytes)
+	}
 
 	if _, err := os.Stat(*identity); os.IsNotExist(err) {
 		fmt.Printf("No Private key exists at %s. Creating one.", *identity)
@@ -74,6 +84,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// register for signals
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		data, _ := ricochetService.MarshalJSON()
+		ioutil.WriteFile(*state, data, 600)
+		os.Exit(0)
+	}()
 
 	fmt.Printf("Listening at: %s ", inf.OnionID)
 
