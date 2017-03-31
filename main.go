@@ -27,7 +27,7 @@ func main() {
 
 	ricochetService := new(TrebuchetBot)
 
-	if _, err := io.Stat(*state); os.IsNotExist(err) {
+	if _, err := os.Stat(*state); os.IsNotExist(err) {
 		fmt.Printf("No State exists. Starting new room.")
 	} else {
 		bytes, _ := ioutil.ReadFile(*state)
