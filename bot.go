@@ -16,6 +16,12 @@ type TrebuchetBot struct {
 	goricochet.StandardRicochetService
 	knownContacts  [][]string
 	activeContacts []*TrebuchetConnection
+
+	// Settings
+	AllowConnections      bool
+	AllowInvites          bool
+	GeneratedNicks        bool
+	JoinPartNotifications bool
 }
 
 // OnNewConnection starts a thread for each new connection.
@@ -45,6 +51,17 @@ func (tb *TrebuchetBot) Invite(addr string, nick string) error {
 		PrivateKey: tb.PrivateKey,
 	}, tb, -1, nick}
 	tb.activeContacts = append(tb.activeContacts, tc)
+
+	known := false
+	for _, k := range tb.knownContacts {
+		if k[0] == addr {
+			known = true
+			break
+		}
+	}
+	if !known {
+		tb.knownContacts = append(tb.knownContacts, []string{addr, nick})
+	}
 
 	go oc.Process(tc)
 	oc.SendContactRequest(5, nick, "You've been invited to join a group chat")
@@ -91,7 +108,15 @@ func (tc *TrebuchetConnection) send(msg string) {
 
 // IsKnownContact Always Accepts Contact Requests
 func (tc *TrebuchetConnection) IsKnownContact(hostname string) bool {
-	return true
+	if tc.TrebuchetBot.AllowConnections {
+		return true
+	}
+	for _, k := range tc.TrebuchetBot.knownContacts {
+		if k[0] == hostname {
+			return true
+		}
+	}
+	return false
 }
 
 func stringInSlice(a string, list []string) bool {
@@ -116,12 +141,25 @@ func (tc *TrebuchetConnection) OnAuthenticationProof(channelID int32, pubkey []b
 	tc.StandardRicochetConnection.OnAuthenticationProof(channelID, pubkey, sig)
 
 	if len(tc.nick) == 0 {
-		tc.nick = tc.Conn.OtherHostname
+		if tc.TrebuchetBot.GeneratedNicks {
+			tc.nick = "anonymous"
+		} else {
+			for _, k := range tc.TrebuchetBot.knownContacts {
+				if k[0] == tc.Conn.OtherHostname {
+					tc.nick = k[1]
+				}
+			}
+			if len(tc.nick) == 0 {
+				tc.nick = tc.Conn.OtherHostname
+			}
+		}
 	}
 
-	for _, c := range tc.TrebuchetBot.activeContacts {
-		if c != tc {
-			c.send(tc.nick + " joined the room.")
+	if tc.TrebuchetBot.JoinPartNotifications {
+		for _, c := range tc.TrebuchetBot.activeContacts {
+			if c != tc {
+				c.send(tc.nick + " joined the room.")
+			}
 		}
 	}
 
@@ -147,6 +185,9 @@ func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, m
 
 	//fmt.Printf("invite re: %v\n", invitere.FindStringSubmatch(message))
 	if addr := invitere.FindStringSubmatch(message); len(addr) > 1 && len(addr[1]) > 0 {
+		if !tc.TrebuchetBot.AllowInvites {
+			return
+		}
 		nick := ""
 		tc.send("Inviting " + addr[1])
 		if len(addr) > 2 && validNickname(addr[2]) {
