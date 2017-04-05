@@ -74,7 +74,14 @@ func (tb *TrebuchetBot) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, known); err != nil {
 		return err
 	}
-	tb.knownContacts = known
+	params := make([]bool, 4)
+	json.Unmarshal([]byte(known[0][0]), params)
+	tb.AllowConnections = params[0]
+	tb.AllowInvites = params[1]
+	tb.GeneratedNicks = params[2]
+	tb.JoinPartNotifications = params[3]
+
+	tb.knownContacts = known[1:]
 	for _, k := range tb.knownContacts {
 		tb.Invite(k[0], k[1])
 	}
@@ -83,7 +90,10 @@ func (tb *TrebuchetBot) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON produces a string encoding of bot state.
 func (tb *TrebuchetBot) MarshalJSON() ([]byte, error) {
-	return json.Marshal(tb.knownContacts)
+	params := []bool{tb.AllowConnections, tb.AllowInvites, tb.GeneratedNicks, tb.JoinPartNotifications}
+	marshaledParams, _ := json.Marshal(params)
+	mush := append([][]string{[]string{string(marshaledParams)}}, tb.knownContacts...)
+	return json.Marshal(mush)
 }
 
 // TrebuchetConnection represents a connection made by TrebucetBot
