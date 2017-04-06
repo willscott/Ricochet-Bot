@@ -165,6 +165,7 @@ func (tc *TrebuchetConnection) OnAuthenticationProof(channelID int32, pubkey []b
 		}
 	}
 
+	log.Printf("Connection from %s (%s)\n", tc.Conn.OtherHostname, tc.nick)
 	if tc.TrebuchetBot.JoinPartNotifications {
 		for _, c := range tc.TrebuchetBot.activeContacts {
 			if c != tc {
@@ -275,8 +276,11 @@ func (tc *TrebuchetConnection) OnDisconnect() {
 			break
 		}
 	}
-	for _, c := range tc.TrebuchetBot.activeContacts {
-		c.send(tc.nick + " left the room.")
+	log.Printf("Disconnect by %s (%s) \n", tc.Conn.OtherHostname, tc.nick)
+	if tc.TrebuchetBot.JoinPartNotifications {
+		for _, c := range tc.TrebuchetBot.activeContacts {
+			c.send(tc.nick + " left the room.")
+		}
 	}
 	tc.StandardRicochetConnection.OnDisconnect()
 }
