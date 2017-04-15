@@ -11,10 +11,17 @@ import (
 	goricochet "github.com/s-rah/go-ricochet"
 )
 
+// TrebuchetContact represents saved information about a contact of the bot
+type TrebuchetContact struct {
+	Hostname string
+	Nickname string
+	Pending  []string
+}
+
 // TrebuchetBot represents the bot logic.
 type TrebuchetBot struct {
 	goricochet.StandardRicochetService
-	knownContacts  [][]string
+	knownContacts  []TrebuchetContact
 	activeContacts []*TrebuchetConnection
 
 	// Settings
@@ -22,13 +29,14 @@ type TrebuchetBot struct {
 	AllowInvites          bool
 	GeneratedNicks        bool
 	JoinPartNotifications bool
+	ReplayLogs            bool
 }
 
 // OnNewConnection starts a thread for each new connection.
 func (tb *TrebuchetBot) OnNewConnection(oc *goricochet.OpenConnection) {
 	if tb.activeContacts == nil {
 		tb.activeContacts = make([]*TrebuchetConnection, 0, 1)
-		tb.knownContacts = make([][]string, 0)
+		tb.knownContacts = make([]TrebuchetContact, 0)
 	}
 	//if !stringInSlice(tc.Conn.OtherHostname, tc.TrebuchetBot.knownContacts) {
 	//	tc.TrebuchetBot.knownContacts = append(tc.TrebuchetBot.knownContacts, tc.Conn.OtherHostname)
@@ -54,13 +62,17 @@ func (tb *TrebuchetBot) Invite(addr string, nick string) error {
 
 	known := false
 	for _, k := range tb.knownContacts {
-		if k[0] == addr {
+		if k.Hostname == addr {
 			known = true
 			break
 		}
 	}
 	if !known {
-		tb.knownContacts = append(tb.knownContacts, []string{addr, nick})
+		tb.knownContacts = append(tb.knownContacts, TrebuchetContact{
+			Hostname: addr,
+			Nickname: nick,
+			Pending:  make([]string, 0),
+		})
 	}
 
 	go oc.Process(tc)
@@ -70,29 +82,30 @@ func (tb *TrebuchetBot) Invite(addr string, nick string) error {
 
 // UnmarshalJSON restores the bot from state
 func (tb *TrebuchetBot) UnmarshalJSON(data []byte) error {
-	known := make([][]string, 0)
+	known := make([]TrebuchetContact, 0)
 	if err := json.Unmarshal(data, known); err != nil {
 		return err
 	}
-	params := make([]bool, 4)
-	json.Unmarshal([]byte(known[0][0]), params)
+	params := make([]bool, 5)
+	json.Unmarshal([]byte(known[0].Nickname), params)
 	tb.AllowConnections = params[0]
 	tb.AllowInvites = params[1]
 	tb.GeneratedNicks = params[2]
 	tb.JoinPartNotifications = params[3]
+	tb.ReplayLogs = params[4]
 
 	tb.knownContacts = known[1:]
 	for _, k := range tb.knownContacts {
-		tb.Invite(k[0], k[1])
+		tb.Invite(k.Hostname, k.Nickname)
 	}
 	return nil
 }
 
 // MarshalJSON produces a string encoding of bot state.
 func (tb *TrebuchetBot) MarshalJSON() ([]byte, error) {
-	params := []bool{tb.AllowConnections, tb.AllowInvites, tb.GeneratedNicks, tb.JoinPartNotifications}
+	params := []bool{tb.AllowConnections, tb.AllowInvites, tb.GeneratedNicks, tb.JoinPartNotifications, tb.ReplayLogs}
 	marshaledParams, _ := json.Marshal(params)
-	mush := append([][]string{[]string{string(marshaledParams)}}, tb.knownContacts...)
+	mush := append([]TrebuchetContact{TrebuchetContact{Hostname: "", Nickname: string(marshaledParams), Pending: nil}}, tb.knownContacts...)
 	return json.Marshal(mush)
 }
 
@@ -122,7 +135,7 @@ func (tc *TrebuchetConnection) IsKnownContact(hostname string) bool {
 		return true
 	}
 	for _, k := range tc.TrebuchetBot.knownContacts {
-		if k[0] == hostname {
+		if k.Hostname == hostname {
 			return true
 		}
 	}
@@ -155,8 +168,8 @@ func (tc *TrebuchetConnection) OnAuthenticationProof(channelID int32, pubkey []b
 			tc.nick = "anonymous"
 		} else {
 			for _, k := range tc.TrebuchetBot.knownContacts {
-				if k[0] == tc.Conn.OtherHostname {
-					tc.nick = k[1]
+				if k.Hostname == tc.Conn.OtherHostname {
+					tc.nick = k.Nickname
 				}
 			}
 			if len(tc.nick) == 0 {
@@ -176,12 +189,22 @@ func (tc *TrebuchetConnection) OnAuthenticationProof(channelID int32, pubkey []b
 
 	known := false
 	for _, k := range tc.TrebuchetBot.knownContacts {
-		if k[0] == tc.Conn.OtherHostname {
+		if k.Hostname == tc.Conn.OtherHostname {
 			known = true
+			if len(k.Pending) > 0 {
+				for _, p := range k.Pending {
+					tc.send(p)
+				}
+				k.Pending = make([]string, 0)
+			}
 		}
 	}
 	if !known {
-		tc.TrebuchetBot.knownContacts = append(tc.TrebuchetBot.knownContacts, []string{tc.Conn.OtherHostname, tc.nick})
+		tc.TrebuchetBot.knownContacts = append(tc.TrebuchetBot.knownContacts, TrebuchetContact{
+			Hostname: tc.Conn.OtherHostname,
+			Nickname: tc.nick,
+			Pending:  make([]string, 0),
+		})
 	}
 }
 
@@ -211,15 +234,31 @@ func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, m
 	} else if partre.MatchString(message) {
 		tc.Conn.Close()
 		for i, k := range tc.TrebuchetBot.knownContacts {
-			if k[0] == tc.Conn.OtherHostname {
+			if k.Hostname == tc.Conn.OtherHostname {
 				tc.TrebuchetBot.knownContacts[i] = tc.TrebuchetBot.knownContacts[len(tc.TrebuchetBot.knownContacts)-1]
 				tc.TrebuchetBot.knownContacts = tc.TrebuchetBot.knownContacts[0 : len(tc.TrebuchetBot.knownContacts)-1]
 			}
 		}
 	}
-	for _, c := range tc.activeContacts {
-		if c != tc {
-			c.send(tc.nick + ": " + message)
+	if tc.TrebuchetBot.ReplayLogs {
+		for _, c := range tc.TrebuchetBot.knownContacts {
+			found := false
+			for _, a := range tc.activeContacts {
+				if a.Conn.OtherHostname == c.Hostname {
+					a.send(tc.nick + ": " + message)
+					found = true
+					break
+				}
+			}
+			if !found {
+				c.Pending = append(c.Pending, tc.nick+": "+message)
+			}
+		}
+	} else {
+		for _, c := range tc.activeContacts {
+			if c != tc {
+				c.send(tc.nick + ": " + message)
+			}
 		}
 	}
 	//fmt.Printf("nick re: %v\n", nickre.FindStringSubmatch(message))
@@ -227,8 +266,8 @@ func (tc *TrebuchetConnection) OnChatMessage(channelID int32, messageID int32, m
 		tc.send("You are now known as " + name[1])
 		tc.nick = name[1]
 		for _, k := range tc.TrebuchetBot.knownContacts {
-			if k[0] == tc.Conn.OtherHostname {
-				k[1] = tc.nick
+			if k.Hostname == tc.Conn.OtherHostname {
+				k.Nickname = tc.nick
 			}
 		}
 	}
