@@ -42,7 +42,7 @@ func (tb *TrebuchetBot) OnNewConnection(oc *goricochet.OpenConnection) {
 	//	tc.TrebuchetBot.knownContacts = append(tc.TrebuchetBot.knownContacts, tc.Conn.OtherHostname)
 	//}
 	tb.StandardRicochetService.OnNewConnection(oc)
-	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{}, tb, -1, oc.OtherHostname}
+	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{}, tb, -1, oc.OtherHostname, false}
 
 	tb.activeContacts = append(tb.activeContacts, tc)
 	go oc.Process(tc)
@@ -57,7 +57,7 @@ func (tb *TrebuchetBot) Invite(addr string, nick string) error {
 	tc := &TrebuchetConnection{goricochet.StandardRicochetConnection{
 		Conn:       oc,
 		PrivateKey: tb.PrivateKey,
-	}, tb, -1, nick}
+	}, tb, -1, nick, true}
 	tb.activeContacts = append(tb.activeContacts, tc)
 
 	known := false
@@ -76,7 +76,6 @@ func (tb *TrebuchetBot) Invite(addr string, nick string) error {
 	}
 
 	go oc.Process(tc)
-	oc.SendContactRequest(5, nick, "You've been invited to join a group chat")
 	return nil
 }
 
@@ -115,6 +114,7 @@ type TrebuchetConnection struct {
 	*TrebuchetBot
 	outboundChatChannel int32
 	nick                string
+	TriggerInvite       bool
 }
 
 func (tc *TrebuchetConnection) send(msg string) {
@@ -149,6 +149,14 @@ func stringInSlice(a string, list []string) bool {
 		}
 	}
 	return false
+}
+
+// OnReady triggers when the connection is opened
+func (tc *TrebuchetConnection) OnReady(oc *goricochet.OpenConnection) {
+	tc.StandardRicochetConnection.OnReady(oc)
+	if tc.TriggerInvite {
+		oc.SendContactRequest(5, tc.nick, "You've been invited to join a group chat")
+	}
 }
 
 // OnContactRequest fires on contact requests
